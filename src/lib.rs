@@ -197,6 +197,29 @@ impl fmt::Display for GetDisjointMutError {
 #[cfg(feature = "std")]
 impl std::error::Error for GetDisjointMutError {}
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+/// The error type returned by [`Slab::pick_many_mut`].
+pub enum PickManyMutError {
+    /// An index provided was not associated with a value.
+    IndexVacant,
+
+    /// An index provided was out-of-bounds for the slab.
+    IndexOutOfBounds,
+}
+
+impl fmt::Display for PickManyMutError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let msg = match self {
+            PickManyMutError::IndexVacant => "an index is vacant",
+            PickManyMutError::IndexOutOfBounds => "an index is out of bounds",
+        };
+        fmt::Display::fmt(msg, f)
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for PickManyMutError {}
+
 /// A handle to a vacant entry in a `Slab`.
 ///
 /// `VacantEntry` allows constructing values with the key that they will be
@@ -846,6 +869,32 @@ impl<T> Slab<T> {
         // SAFETY: the loop above only terminates successfully if it initialized
         // all elements of this array.
         Ok(unsafe { res.assume_init() })
+    }
+
+    /// Returns mutable references to many indices at once.
+    ///
+    /// Returns [`PickManyMutError`] if the indices are out of bounds,
+    /// or vacant.
+    pub fn pick_many_mut(&mut self, keys: &[usize]) -> Result<Vec<&mut T>, PickManyMutError> {
+        let entries_ptr = self.entries.as_mut_ptr();
+        let entries_len = self.entries.len();
+
+        let mut res = Vec::with_capacity(keys.len());
+
+        for &key in keys.iter() {
+            // `key` won't be greater than `entries_len`.
+            if key >= entries_len {
+                return Err(PickManyMutError::IndexOutOfBounds);
+            }
+            // SAFETY: we made sure above that this key is in bounds.
+            match unsafe { &mut *entries_ptr.add(key) } {
+                Entry::Vacant(_) => return Err(PickManyMutError::IndexVacant),
+                Entry::Occupied(entry) => {
+                    res.push(entry);
+                }
+            }
+        }
+        Ok(res)
     }
 
     /// Return a reference to the value associated with the given key without
